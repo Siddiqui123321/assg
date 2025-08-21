@@ -1,80 +1,75 @@
-import json
+import psutil
 import socket
-import time
+import platform
+import shutil
+import requests
 from datetime import datetime, timezone
 
-import psutil
-import requests
 
+# Embedded default config
 DEFAULT_CONFIG = {
     "backend_url": "http://127.0.0.1:8000/api/v1/ingest",
-    "api_key": "TESTKEY123",
-    "interval_sec": 0
+    "api_key": "TESTKEY123"
 }
 
 def load_config():
     return DEFAULT_CONFIG
+
+def collect_system_info():
+    vm = psutil.virtual_memory()
+    disk = shutil.disk_usage("/")
+    cpu_freq = psutil.cpu_freq()
+
+    return {
+        "os": platform.platform(),
+        "processor": platform.processor(),
+        "cores": psutil.cpu_count(logical=False) or 0,
+        "threads": psutil.cpu_count(logical=True) or 0,
+        "ram_gb": round(vm.total / (1024**3), 2),
+        "used_ram_gb": round((vm.total - vm.available) / (1024**3), 2),
+        "available_ram_gb": round(vm.available / (1024**3), 2),
+        "storage_total_gb": round(disk.total / (1024**3), 2),
+        "storage_used_gb": round(disk.used / (1024**3), 2),
+        "storage_free_gb": round(disk.free / (1024**3), 2),
+        "cpu_freq_mhz": round(cpu_freq.current, 2) if cpu_freq else None,
+    }
+
 def collect_processes():
-    procs = []
-    for p in psutil.process_iter(attrs=['pid','ppid','name','cmdline','memory_info']):
+    processes = []
+    for proc in psutil.process_iter(["pid", "ppid", "name", "cpu_percent", "memory_info", "cmdline"]):
         try:
-            info = p.info
-            if not info.get("pid") or not info.get("ppid"):
-                continue  # skip invalid
-            name = info.get("name") or "unknown"
-            cpu = p.cpu_percent(None)
-            mem = (info.get("memory_info").rss if info.get("memory_info") else p.memory_info().rss) / (1024*1024)
-            cmd = " ".join(info.get("cmdline") or [])
-            procs.append({
-                "pid": int(info["pid"]),
-                "ppid": int(info["ppid"]),
-                "name": name,
-                "cpu_percent": float(cpu),
-                "memory_mb": float(mem),
-                "cmdline": cmd[:8192]
+            info = proc.info
+            processes.append({
+                "pid": info["pid"],
+                "ppid": info["ppid"],
+                "name": info["name"] or "unknown",
+                "cpu_percent": info["cpu_percent"],
+                "memory_mb": round(info["memory_info"].rss / (1024*1024), 2) if info.get("memory_info") else 0.0,
+                "cmdline": " ".join(info["cmdline"]) if info["cmdline"] else ""
             })
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-        except Exception:
-            continue  # last-resort safety
-    return procs
-
-
-def post_payload(cfg, processes):
-    payload = {
-        'hostname': socket.gethostname(),
-        'captured_at': datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
-        'processes': processes
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'X-API-KEY': cfg['api_key']
-    }
-    url = cfg['backend_url'].rstrip('/')
-    if not url.endswith('/api/v1/ingest'):
-        url = url + '/api/v1/ingest'
-    r = requests.post(url, headers=headers, data=json.dumps(payload), timeout=30)
-    
-    if r.status_code != 200:
-        print("Serializer errors:", r.text)  # 👈 add this line
-
-    r.raise_for_status()
-    return r.json()
-
+    return processes
 
 def main():
-    cfg = load_config()
-    interval = int(cfg.get('interval_sec', 0) or 0)
-    while True:
-        procs = collect_processes()
-        try:
-            res = post_payload(cfg, procs)
-            print(f"Sent {len(procs)} processes. Snapshot ID: {res.get('snapshot_id')}")
-        except Exception as e:
-            print('Error sending data:', e)
-        if interval <= 0:
-            break
-        time.sleep(interval)
+    config = load_config()
+    backend_url = config["backend_url"]
+    api_key = config["api_key"]
 
-if __name__ == '__main__':
+    payload = {
+        "hostname": socket.gethostname(),
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "system_info": collect_system_info(),
+        "processes": collect_processes()
+    }
+
+    headers = {"X-API-KEY": api_key}
+    try:
+        r = requests.post(backend_url, json=payload, headers=headers, timeout=10)
+        r.raise_for_status()
+        print(f"Sent {len(payload['processes'])} processes + system info. Snapshot ID: {r.json().get('snapshot_id')}")
+    except Exception as e:
+        print("Error sending data:", e)
+
+if __name__ == "__main__":
     main()

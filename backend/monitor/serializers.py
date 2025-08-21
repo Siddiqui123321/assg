@@ -3,7 +3,7 @@ from rest_framework import serializers
 class ProcessIngestSerializer(serializers.Serializer):
     pid = serializers.IntegerField()
     ppid = serializers.IntegerField()
-    name = serializers.CharField(max_length=255)
+    name = serializers.CharField(max_length=255, allow_blank=True)
     cpu_percent = serializers.FloatField()
     memory_mb = serializers.FloatField()
     cmdline = serializers.CharField(allow_blank=True, required=False, max_length=8192)

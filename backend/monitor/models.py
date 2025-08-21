@@ -7,6 +7,11 @@ class Host(models.Model):
 
     def __str__(self):
         return self.hostname
+    
+    @property
+    def is_authenticated(self):
+        """So DRF treats Host like an authenticated user."""
+        return True
 
 class Snapshot(models.Model):
     host = models.ForeignKey(Host, on_delete=models.CASCADE, related_name='snapshots')

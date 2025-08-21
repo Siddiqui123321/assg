@@ -16,7 +16,13 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from monitor import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/v1/ingest', views.ingest),
+    path('api/v1/hosts', views.hosts),
+    path('api/v1/snapshots/latest', views.latest_snapshot),
+    path('api/v1/snapshots/<int:snapshot_id>/processes', views.snapshot_processes),
+    path('', views.index, name='index'),
 ]

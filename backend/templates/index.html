@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Process Monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .caret { cursor:pointer; user-select:none; }
+    .nested { display:none; margin-left:1rem; }
+    .active { display:block; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="max-w-6xl mx-auto p-6">
+    <h1 class="text-2xl font-bold mb-4">Process Monitoring</h1>
+
+    <div class="flex flex-wrap items-end gap-3 bg-white p-4 rounded-xl shadow">
+      <div>
+        <label class="text-sm text-gray-600">Host</label>
+        <select id="hostSelect" class="border rounded-lg p-2 w-64"></select>
+      </div>
+      <div>
+        <label class="text-sm text-gray-600">Auto refresh (s)</label>
+        <input id="autoSeconds" class="border rounded-lg p-2 w-24" type="number" min="5" value="15" />
+      </div>
+      <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-blue-600 text-white">Refresh</button>
+      <label class="inline-flex items-center gap-2">
+        <input id="autoToggle" type="checkbox" /> Auto
+      </label>
+      <div class="flex-1"></div>
+      <input id="search" placeholder="Search name or PID" class="border rounded-lg p-2 w-64" />
+    </div>
+
+    <div id="meta" class="text-sm text-gray-600 mt-3"></div>
+
+    <div id="tree" class="mt-4 bg-white rounded-xl shadow p-4 mono text-sm"></div>
+  </div>
+
+  <script>
+    const API = '';
+    let allProcs = [];
+
+    async function fetchHosts(){
+      const res = await fetch(`${API}/api/v1/hosts`);
+      const data = await res.json();
+      const sel = document.getElementById('hostSelect');
+      sel.innerHTML='';
+      data.forEach(h=>{
+        const opt = document.createElement('option');
+        opt.value = h.hostname; opt.textContent = `${h.hostname}`;
+        sel.appendChild(opt);
+      });
+      return data;
+    }
+
+    async function fetchLatest(hostname){
+      const res = await fetch(`${API}/api/v1/snapshots/latest?hostname=${encodeURIComponent(hostname)}`);
+      if(!res.ok) throw new Error('No latest snapshot');
+      return await res.json();
+    }
+
+    async function fetchProcesses(id){
+      const res = await fetch(`${API}/api/v1/snapshots/${id}/processes`);
+      return await res.json();
+    }
+
+    function buildTree(list){
+      const byPpid = new Map();
+      const byPid = new Map();
+      list.forEach(p=>{ byPid.set(p.pid, p); });
+      list.forEach(p=>{
+        if(!byPpid.has(p.ppid)) byPpid.set(p.ppid, []);
+        byPpid.get(p.ppid).push(p);
+      });
+      const roots = list.filter(p=>!byPid.has(p.ppid));
+      function renderNode(p){
+        const kids = byPpid.get(p.pid)||[];
+        const hasKids = kids.length>0;
+        const li = document.createElement('li');
+        li.className='mb-1';
+        const label = document.createElement('span');
+        label.className='caret';
+        label.innerHTML = hasKids ? '▶︎ ' : '&nbsp;&nbsp;';
+        const text = document.createElement('span');
+        text.innerHTML = `<strong>${p.name}</strong> (PID ${p.pid}, PPID ${p.ppid}) — CPU ${p.cpu_percent.toFixed(1)}% | RAM ${p.memory_mb.toFixed(1)} MB`;
+        li.appendChild(label); li.appendChild(text);
+        if(hasKids){
+          const ul = document.createElement('ul');
+          ul.className='nested';
+          kids.sort((a,b)=>a.name.localeCompare(b.name)).forEach(k=>ul.appendChild(renderNode(k)));
+          li.appendChild(ul);
+          label.addEventListener('click', ()=>{
+            ul.classList.toggle('active');
+            label.textContent = ul.classList.contains('active') ? '▼ ' : '▶︎ ';
+          });
+        }
+        return li;
+      }
+      const ul = document.createElement('ul');
+      roots.sort((a,b)=>a.name.localeCompare(b.name)).forEach(r=>ul.appendChild(renderNode(r)));
+      return ul;
+    }
+
+    function render(){
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      const list = q ? allProcs.filter(p=> String(p.pid).includes(q) || p.name.toLowerCase().includes(q)) : allProcs;
+      const tree = document.getElementById('tree');
+      tree.innerHTML='';
+      tree.appendChild(buildTree(list));
+    }
+
+    async function load(){
+      const hosts = await fetchHosts();
+      if (!hosts.length) { document.getElementById('meta').textContent = 'No hosts yet.'; return; }
+      const sel = document.getElementById('hostSelect');
+      const hostname = sel.value || hosts[0].hostname;
+      const latest = await fetchLatest(hostname);
+      const procs = await fetchProcesses(latest.snapshot_id);
+      allProcs = procs;
+      document.getElementById('meta').textContent = `${hostname} — ${new Date(latest.captured_at).toLocaleString()} — ${latest.process_count} processes`;
+      render();
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', load);
+    document.getElementById('hostSelect').addEventListener('change', load);
+    document.getElementById('search').addEventListener('input', render);
+
+    let timer=null;
+    document.getElementById('autoToggle').addEventListener('change', (e)=>{
+      if(e.target.checked){
+        const sec = Math.max(5, parseInt(document.getElementById('autoSeconds').value)||15);
+        timer = setInterval(load, sec*1000);
+      } else { clearInterval(timer); timer=null; }
+    });
+
+    load();
+  </script>
+</body>
+</html>

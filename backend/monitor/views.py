@@ -9,6 +9,7 @@ from .serializers import IngestSerializer
 
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def ingest(request):
     # Require API key in headers
     api_key = request.headers.get("X-API-KEY")
@@ -23,8 +24,13 @@ def ingest(request):
     data = serializer.validated_data
     hostname = data["hostname"]
 
-    # Validate host against API key
-    host = get_object_or_404(Host, hostname=hostname, api_key=api_key)
+    # Upsert host: auto-create if not present; enforce API key match if it exists
+    try:
+        host = Host.objects.get(hostname=hostname)
+        if host.api_key != api_key:
+            return Response({"detail": "Invalid API key for host"}, status=status.HTTP_403_FORBIDDEN)
+    except Host.DoesNotExist:
+        host = Host.objects.create(hostname=hostname, api_key=api_key)
 
     # Extract system info from validated serializer
     sysinfo = data["system_info"]

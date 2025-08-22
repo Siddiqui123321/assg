@@ -15,7 +15,8 @@ class APIKeyAuthentication(BaseAuthentication):
         try:
             host = Host.objects.get(api_key=key)
         except Host.DoesNotExist:
-            raise AuthenticationFailed('Invalid API key')
+            # Return None to let the view handle first-time hosts / auto-create logic
+            return None
 
         # Return (user, auth) → DRF will treat Host as the "user"
         return (host, None)

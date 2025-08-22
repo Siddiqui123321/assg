@@ -1,0 +1,18 @@
+# Virtual environment
+.venv/
+
+# Agent build output / local build directories
+agent/
+build/
+dist/
+
+# Python cache / bytecode
+__pycache__/
+*.py[cod]
+
+# Packaging
+*.egg-info/
+
+# Env files / IDE
+.env
+.vscode/

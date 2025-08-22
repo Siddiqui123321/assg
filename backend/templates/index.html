@@ -13,46 +13,75 @@
   </style>
 </head>
 <body class="bg-gray-50">
-  <div class="max-w-6xl mx-auto p-6">
+  <div class="max-w-7xl mx-auto p-6">
     <h1 class="text-2xl font-bold mb-4">Process Monitoring</h1>
 
-    <div class="flex flex-wrap items-end gap-3 bg-white p-4 rounded-xl shadow">
-      <div>
-        <label class="text-sm text-gray-600">Host</label>
-        <select id="hostSelect" class="border rounded-lg p-2 w-64"></select>
-      </div>
-      <div>
-        <label class="text-sm text-gray-600">Auto refresh (s)</label>
-        <input id="autoSeconds" class="border rounded-lg p-2 w-24" type="number" min="5" value="15" />
-      </div>
-      <button id="refreshBtn" class="px-4 py-2 rounded-xl bg-blue-600 text-white">Refresh</button>
-      <label class="inline-flex items-center gap-2">
-        <input id="autoToggle" type="checkbox" /> Auto
-      </label>
-      <div class="flex-1"></div>
-      <input id="search" placeholder="Search name or PID" class="border rounded-lg p-2 w-64" />
+    <div class="flex gap-4">
+      <aside class="w-64 bg-white rounded-xl shadow p-3 h-[75vh] overflow-auto">
+        <div class="flex items-center gap-2 mb-3">
+          <button id="refreshBtn" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm">Refresh</button>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input id="autoToggle" type="checkbox" /> Auto
+          </label>
+          <div class="flex items-center gap-1">
+            <span class="text-xs text-gray-600">Every</span>
+            <input id="autoSeconds" class="border rounded-lg p-1.5 w-16 text-sm" type="number" min="2" value="10" />
+            <span class="text-xs text-gray-600">sec</span>
+          </div>
+        </div>
+        <div class="text-xs text-gray-500 mb-2">Hosts</div>
+        <ul id="hostList" class="space-y-1"></ul>
+      </aside>
+
+      <main class="flex-1">
+        <div id="meta" class="text-sm text-gray-600 mb-3"></div>
+
+        <div class="bg-white rounded-xl shadow">
+          <div class="border-b flex">
+            <button id="tabSystem" class="px-4 py-2 text-sm font-medium border-b-2 border-blue-600">System Details</button>
+            <button id="tabProcs" class="px-4 py-2 text-sm font-medium text-gray-600">Processes Details</button>
+            <div class="flex-1"></div>
+            <div class="px-4 py-2">
+              <input id="search" placeholder="Search name or PID" class="border rounded-lg p-2 w-64" />
+            </div>
+          </div>
+
+          <section id="systemPane" class="p-4">
+            <table class="min-w-full text-sm">
+              <tbody id="systemBody"></tbody>
+            </table>
+          </section>
+
+          <section id="processPane" class="p-4 hidden">
+            <div class="overflow-auto max-h-[65vh]">
+              <table class="min-w-full text-sm mono">
+                <thead class="text-left text-gray-700">
+                  <tr>
+                    <th class="py-1 pr-2">Name</th>
+                    <th class="py-1 pr-2">Memory (MB)</th>
+                    <th class="py-1 pr-2">CPU (%)</th>
+                    <th class="py-1 pr-2">PPID</th>
+                    <th class="py-1 pr-2">PID</th>
+                  </tr>
+                </thead>
+                <tbody id="procBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
     </div>
-
-    <div id="meta" class="text-sm text-gray-600 mt-3"></div>
-
-    <div id="tree" class="mt-4 bg-white rounded-xl shadow p-4 mono text-sm"></div>
   </div>
 
   <script>
     const API = '';
     let allProcs = [];
+    let currentHost = null;
+    let currentLatest = null;
 
     async function fetchHosts(){
       const res = await fetch(`${API}/api/v1/hosts`);
-      const data = await res.json();
-      const sel = document.getElementById('hostSelect');
-      sel.innerHTML='';
-      data.forEach(h=>{
-        const opt = document.createElement('option');
-        opt.value = h.hostname; opt.textContent = `${h.hostname}`;
-        sel.appendChild(opt);
-      });
-      return data;
+      return await res.json();
     }
 
     async function fetchLatest(hostname){
@@ -66,7 +95,42 @@
       return await res.json();
     }
 
-    function buildTree(list){
+    function renderHostsList(hosts){
+      const ul = document.getElementById('hostList');
+      ul.innerHTML='';
+      hosts.forEach(h=>{
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.className = 'w-full text-left px-2 py-1 rounded hover:bg-gray-100 ' + (h.hostname===currentHost ? 'bg-blue-50 text-blue-700' : '')
+        btn.textContent = h.hostname;
+        btn.addEventListener('click', ()=> selectHost(h.hostname));
+        li.appendChild(btn);
+        ul.appendChild(li);
+      });
+    }
+
+    function renderSystem(sys){
+      const tbody = document.getElementById('systemBody');
+      const rows = [
+        ['Name', sys.hostname],
+        ['Operating System', sys.os],
+        ['Processor', sys.processor||''],
+        ['Number of Cores', sys.cores],
+        ['Number of Threads', sys.threads],
+        ['RAM (GB)', sys.ram_gb],
+        ['Used RAM (GB)', sys.used_ram_gb],
+        ['Available RAM (GB)', sys.available_ram_gb],
+        ['Storage Free (GB)', sys.storage_free_gb],
+        ['Storage Total (GB)', sys.storage_total_gb],
+        ['Storage Used (GB)', sys.storage_used_gb],
+        ['CPU Frequency (MHz)', sys.cpu_freq_mhz ?? '']
+      ];
+      tbody.innerHTML = rows.map(([k,v])=>`<tr class="border-b"><td class="py-2 pr-8 font-medium">${k}</td><td class="py-2">${v}</td></tr>`).join('');
+    }
+
+    function renderProcesses(){
+      const q = document.getElementById('search').value.trim().toLowerCase();
+      const list = q ? allProcs.filter(p=> String(p.pid).includes(q) || String(p.ppid).includes(q) || p.name.toLowerCase().includes(q)) : allProcs;
       const byPpid = new Map();
       const byPid = new Map();
       list.forEach(p=>{ byPid.set(p.pid, p); });
@@ -75,67 +139,177 @@
         byPpid.get(p.ppid).push(p);
       });
       const roots = list.filter(p=>!byPid.has(p.ppid));
-      function renderNode(p){
-        const kids = byPpid.get(p.pid)||[];
+
+      const tbody = document.getElementById('procBody');
+      tbody.innerHTML = '';
+
+      function appendRow(p, level){
+        const kids = (byPpid.get(p.pid)||[]).sort((a,b)=> a.name.localeCompare(b.name));
         const hasKids = kids.length>0;
-        const li = document.createElement('li');
-        li.className='mb-1';
-        const label = document.createElement('span');
-        label.className='caret';
-        label.innerHTML = hasKids ? '▶︎ ' : '&nbsp;&nbsp;';
-        const text = document.createElement('span');
-        text.innerHTML = `<strong>${p.name}</strong> (PID ${p.pid}, PPID ${p.ppid}) — CPU ${p.cpu_percent.toFixed(1)}% | RAM ${p.memory_mb.toFixed(1)} MB`;
-        li.appendChild(label); li.appendChild(text);
+        const tr = document.createElement('tr');
+        tr.className = 'border-b hover:bg-gray-50';
+        tr.dataset.pid = String(p.pid);
+        tr.dataset.ppid = String(p.ppid);
+        tr.dataset.level = String(level);
+        if(level>0) tr.style.display = 'none';
+
+        const nameTd = document.createElement('td');
+        nameTd.className = 'py-1 pr-2';
+        nameTd.style.paddingLeft = `${level*16}px`;
         if(hasKids){
-          const ul = document.createElement('ul');
-          ul.className='nested';
-          kids.sort((a,b)=>a.name.localeCompare(b.name)).forEach(k=>ul.appendChild(renderNode(k)));
-          li.appendChild(ul);
-          label.addEventListener('click', ()=>{
-            ul.classList.toggle('active');
-            label.textContent = ul.classList.contains('active') ? '▼ ' : '▶︎ ';
+          const btn = document.createElement('button');
+          btn.className = 'caret-btn mr-1 text-xs px-1 rounded hover:bg-gray-200';
+          btn.textContent = '▶';
+          btn.dataset.pid = String(p.pid);
+          btn.setAttribute('aria-label','toggle-children');
+          nameTd.appendChild(btn);
+        } else {
+          const dot = document.createElement('span');
+          dot.className = 'mr-2 text-gray-400';
+          dot.textContent = '•';
+          nameTd.appendChild(dot);
+        }
+        nameTd.appendChild(document.createTextNode(p.name));
+
+        const memTd = document.createElement('td'); memTd.className='py-1 pr-2'; memTd.textContent = (p.memory_mb??0).toFixed(2);
+        const cpuTd = document.createElement('td'); cpuTd.className='py-1 pr-2'; cpuTd.textContent = (p.cpu_percent??0).toFixed(1);
+        const ppidTd = document.createElement('td'); ppidTd.className='py-1 pr-2'; ppidTd.textContent = p.ppid;
+        const pidTd = document.createElement('td'); pidTd.className='py-1 pr-2'; pidTd.textContent = p.pid;
+
+        tr.appendChild(nameTd); tr.appendChild(memTd); tr.appendChild(cpuTd); tr.appendChild(ppidTd); tr.appendChild(pidTd);
+        tbody.appendChild(tr);
+
+        kids.forEach(k=> appendRow(k, level+1));
+      }
+
+      roots.sort((a,b)=> a.name.localeCompare(b.name)).forEach(r=> appendRow(r, 0));
+
+      // Delegate toggle behavior
+      tbody.onclick = function(e){
+        const btn = e.target.closest('.caret-btn');
+        if(!btn) return;
+        const pid = btn.dataset.pid;
+        const open = btn.textContent === '▼';
+        btn.textContent = open ? '▶' : '▼';
+
+        const stack = [pid];
+        while(stack.length){
+          const cur = stack.pop();
+          const children = Array.from(tbody.querySelectorAll(`tr[data-ppid="${cur}"]`));
+          children.forEach(row=>{
+            if(open){
+              // closing: hide this subtree
+              row.style.display = 'none';
+              const cb = row.querySelector('.caret-btn');
+              if(cb) cb.textContent = '▶';
+              stack.push(row.dataset.pid);
+            }else{
+              // opening: show direct children; expand further if their caret is already open
+              row.style.display = '';
+              const cb = row.querySelector('.caret-btn');
+              if(cb && cb.textContent === '▼'){
+                stack.push(row.dataset.pid);
+              }
+            }
           });
         }
-        return li;
+      };
+
+      if(!tbody.children.length){
+        tbody.innerHTML = '<tr><td class="py-2 text-gray-500" colspan="5">No processes</td></tr>';
       }
-      const ul = document.createElement('ul');
-      roots.sort((a,b)=>a.name.localeCompare(b.name)).forEach(r=>ul.appendChild(renderNode(r)));
-      return ul;
     }
 
-    function render(){
-      const q = document.getElementById('search').value.trim().toLowerCase();
-      const list = q ? allProcs.filter(p=> String(p.pid).includes(q) || p.name.toLowerCase().includes(q)) : allProcs;
-      const tree = document.getElementById('tree');
-      tree.innerHTML='';
-      tree.appendChild(buildTree(list));
+    function renderMeta(){
+      if(!currentLatest){ document.getElementById('meta').textContent=''; return; }
+      document.getElementById('meta').textContent = `${currentLatest.system.hostname} — ${new Date(currentLatest.captured_at).toLocaleString()} — ${currentLatest.process_count} processes`;
     }
 
-    async function load(){
+    async function loadAll(){
       const hosts = await fetchHosts();
-      if (!hosts.length) { document.getElementById('meta').textContent = 'No hosts yet.'; return; }
-      const sel = document.getElementById('hostSelect');
-      const hostname = sel.value || hosts[0].hostname;
-      const latest = await fetchLatest(hostname);
-      const procs = await fetchProcesses(latest.snapshot_id);
-      allProcs = procs;
-      document.getElementById('meta').textContent = `${hostname} — ${new Date(latest.captured_at).toLocaleString()} — ${latest.process_count} processes`;
-      render();
+      if (!hosts.length) { 
+        document.getElementById('meta').textContent = 'No hosts yet.'; 
+        document.getElementById('hostList').innerHTML=''; 
+        return; 
+      }
+      if(!currentHost){ 
+        currentHost = hosts[0].hostname; 
+      }
+      renderHostsList(hosts);
+      await selectHost(currentHost);
     }
 
-    document.getElementById('refreshBtn').addEventListener('click', load);
-    document.getElementById('hostSelect').addEventListener('change', load);
-    document.getElementById('search').addEventListener('input', render);
+    async function selectHost(hostname){
+      if(!hostname) return;
+      currentHost = hostname;
+      try {
+        const latest = await fetchLatest(hostname);
+        currentLatest = latest;
+        const procs = await fetchProcesses(latest.snapshot_id);
+        allProcs = procs;
+        renderSystem(latest.system);
+        renderProcesses();
+        renderMeta();
+        // highlight current in host list
+        const hosts = await fetchHosts();
+        renderHostsList(hosts);
+      } catch(error) {
+        console.error('Error loading host:', error);
+        document.getElementById('meta').textContent = `Error loading ${hostname}: ${error.message}`;
+      }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', ()=> {
+      if(currentHost) {
+        selectHost(currentHost);
+      } else {
+        loadAll();
+      }
+    });
+    document.getElementById('search').addEventListener('input', renderProcesses);
+
+    // Tabs
+    const tabSystem = document.getElementById('tabSystem');
+    const tabProcs = document.getElementById('tabProcs');
+    const systemPane = document.getElementById('systemPane');
+    const processPane = document.getElementById('processPane');
+    function showSystem(){
+      tabSystem.classList.add('border-blue-600');
+      tabSystem.classList.remove('text-gray-600');
+      tabProcs.classList.add('text-gray-600');
+      tabProcs.classList.remove('border-blue-600');
+      systemPane.classList.remove('hidden');
+      processPane.classList.add('hidden');
+    }
+    function showProcs(){
+      tabProcs.classList.add('border-blue-600');
+      tabProcs.classList.remove('text-gray-600');
+      tabSystem.classList.add('text-gray-600');
+      tabSystem.classList.remove('border-blue-600');
+      systemPane.classList.add('hidden');
+      processPane.classList.remove('hidden');
+    }
+    tabSystem.addEventListener('click', showSystem);
+    tabProcs.addEventListener('click', showProcs);
 
     let timer=null;
     document.getElementById('autoToggle').addEventListener('change', (e)=>{
       if(e.target.checked){
-        const sec = Math.max(5, parseInt(document.getElementById('autoSeconds').value)||15);
-        timer = setInterval(load, sec*1000);
-      } else { clearInterval(timer); timer=null; }
+        const sec = Math.max(2, parseInt(document.getElementById('autoSeconds').value)||15);
+        timer = setInterval(()=> {
+          if(currentHost) {
+            selectHost(currentHost);
+          }
+        }, sec*1000);
+        console.log('Auto refresh started:', sec, 'seconds');
+      } else { 
+        clearInterval(timer); 
+        timer=null; 
+        console.log('Auto refresh stopped');
+      }
     });
 
-    load();
+    loadAll();
   </script>
 </body>
 </html>

@@ -61,8 +61,12 @@ def ingest(request):
     ]
     Process.objects.bulk_create(processes)
 
+    # Persist process count on the snapshot for quick summaries
+    snapshot.process_count = len(processes)
+    snapshot.save(update_fields=["process_count"])
+
     return Response(
-        {"snapshot_id": snapshot.id, "processes": len(processes)},
+        {"snapshot_id": snapshot.id, "processes": snapshot.process_count},
         status=status.HTTP_201_CREATED,
     )
 
@@ -100,6 +104,20 @@ def latest_snapshot(request):
             "snapshot_id": snap.id,
             "captured_at": snap.captured_at,
             "process_count": snap.process_count,
+            "system": {
+                "hostname": snap.host.hostname,
+                "os": snap.os,
+                "processor": snap.processor,
+                "cores": snap.cores,
+                "threads": snap.threads,
+                "ram_gb": snap.ram_gb,
+                "used_ram_gb": snap.used_ram_gb,
+                "available_ram_gb": snap.available_ram_gb,
+                "storage_total_gb": snap.storage_total_gb,
+                "storage_used_gb": snap.storage_used_gb,
+                "storage_free_gb": snap.storage_free_gb,
+                "cpu_freq_mhz": snap.cpu_freq_mhz,
+            },
         }
     )
 

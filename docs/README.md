@@ -27,7 +27,7 @@ python -m venv .venv
 
 # 2) Install deps
 python -m pip install --upgrade pip
-pip install django djangorestframework requests psutil
+python -m pip install -r ../requirements.txt
 
 # 3) Run DB migrations
 python manage.py migrate
@@ -101,7 +101,7 @@ assg/
   backend/                  # Django project
     backend/urls.py         # API + index routes
     monitor/                # app with models, views
-    templates/index.html    # Tailwind UI
+    templates/index.html    # HTML, Tailwind CSS (CDN), Vanilla JavaScript.
   docs/README.md            # this file
 ```
 

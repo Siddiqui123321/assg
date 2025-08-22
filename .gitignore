@@ -2,9 +2,7 @@
 .venv/
 
 # Agent build output / local build directories
-agent/
 build/
-dist/
 
 # Python cache / bytecode
 __pycache__/
